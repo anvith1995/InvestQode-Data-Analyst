@@ -97,23 +97,71 @@ Stores daily trading activity at the **lowest analytical grain**.
 
 Raw data is mapped into the normalized schema using a **composite join strategy** to avoid missing or mismatching contracts.
 
-```sql
+```
+contracts query
+SELECT
+    ROW_NUMBER() OVER (
+        ORDER BY instrument_id, expiry_date, strike_price, option_type
+    ) AS contract_id,
+    instrument_id,
+    expiry_date,
+    strike_price,
+    option_type
+FROM (
+    SELECT DISTINCT
+        i.instrument_id,
+        STRPTIME(r.EXPIRY_DT, '%d-%b-%Y')::DATE AS expiry_date,
+        r.STRIKE_PR AS strike_price,
+        r.OPTION_TYP AS option_type
+    FROM raw_data r
+    JOIN INSTRUMENTS i
+      ON r.SYMBOL = i.symbol
+     AND r.INSTRUMENT = i.instrument_type
+
+Joins raw market data to the instruments dimension
+
+Converts expiry date into a proper DATE
+
+Removes duplicate contracts using DISTINCT
+
+Produces one row per unique contract definition
+
+This forms the natural key for the Contracts table.
+```
+```
+--fact_trade query
+SELECT
+    ROW_NUMBER() OVER () AS trade_id,
+    c.contract_id,
+    1 AS exchange_id,
+    STRPTIME(r.TIMESTAMP, '%d-%b-%Y')::DATE,
+
+    r.OPEN,
+    r.HIGH,
+    r.LOW,
+    r.CLOSE,
+    r.SETTLE_PR,
+
+    r.CONTRACTS,
+    r.VAL_INLAKH,
+    r.OPEN_INT,
+    r.CHG_IN_OI
 FROM raw_data r
-JOIN instruments i
+JOIN INSTRUMENTS i
   ON r.SYMBOL = i.symbol
  AND r.INSTRUMENT = i.instrument_type
-JOIN contracts c
+JOIN CONTRACTS c
   ON c.instrument_id = i.instrument_id
  AND STRPTIME(r.EXPIRY_DT, '%d-%b-%Y')::DATE = c.expiry_date
- AND COALESCE(r.STRIKE_PR, 0) = COALESCE(c.strike_price, 0)
- AND COALESCE(r.OPTION_TYP, 'NA') = COALESCE(c.option_type, 'NA');
+ AND COALESCE(r.STRIKE_PR,0) = COALESCE(c.strike_price,0)
+ AND COALESCE(r.OPTION_TYP,'NA') = COALESCE(c.option_type,'NA');
 
-
-
+Raw market data is normalized in two stages. First, unique combinations of symbol and instrument type are extracted into the Instruments table. Next, tradable contracts are derived by combining instrument_id with expiry date, strike price, and option type. Finally, daily trading metrics are stored in the Fact_Trade table and linked to contracts using a composite join, ensuring referential integrity and 3NF compliance.
+```
 ---
 
-### Optimization Objective
-Identify the **highest trading volume day per symbol** over a rolling **30-day window** with minimal scan cost and maximum efficiency. Have added this SQL query shared
+### Optimization Object
+Identify the **highest trading volume day per symbol** over a rolling **30-day window** with minimal scan cost and maximum efficiency. Have added this SQL query shared in main code.
 
 ---
 
